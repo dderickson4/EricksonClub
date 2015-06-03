@@ -5,7 +5,7 @@
  * the Express app object.
  */
 
-var app = require('./app').init(5000);
+var app = require('./app').init(80);
 var fs = require('fs');
 
 var redisdb = require('./models/redisdb.js');
