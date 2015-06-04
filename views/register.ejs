@@ -58,42 +58,42 @@ $(document).ready(function () {
         <div id="errorWrapper">
           <%-error%> 
         </div>
-        <div class="content">
-        <form class="form-horizontal" id="registerHere" method='post' action='/register'>
+        <div class="content ">
+        <form class="form-horizontal " id="registerHere" method='post' action='/register'>
           
           <fieldset>
             <legend>Sign-up Form</legend>
             <div class="control-group">
-              <label class="control-label" for="input01">Name</label>
+              <label class="control-label" for="user_name">Name</label>
               <div class="controls">
-                <input type="text" class="input-xlarge" id="user_name" name="user_name" rel="popover" data-content="Enter your first and last name." data-original-title="Full Name" value="<%=data.user_name%>">
+                <input type="text" class="form-control" id="user_name" name="user_name" data-toggle="tooltip" data-content="Enter your first and last name." data-original-title="Full Name" value="<%=data.user_name%>">
               </div>
             </div>
 
              <div class="control-group">
-              <label class="control-label" for="input01">Organization</label>
+              <label class="control-label" for="org">Organization</label>
               <div class="controls">
-                <input type="text" class="input-xlarge" id="org" name="org" rel="popover" data-content="What’s your companies name?" data-original-title="Organization" value="<%=data.org%>">
+                <input type="text" class="form-control" id="org" name="org" data-toggle="tooltip" data-content="What’s your companies name?" data-original-title="Organization" value="<%=data.org%>">
               </div>
             </div>
 
             <div class="control-group">
-              <label class="control-label" for="input01">Email</label>
+              <label class="control-label" for="user_email">Email</label>
               <div class="controls">
-                <input type="text" class="input-xlarge" id="user_email" name="user_email" rel="popover" data-content="What’s your email address?" data-original-title="Email" value="<%=data.user_email%>">
+                <input type="text" class="form-control" id="user_email" name="user_email" rel="popover" data-content="What’s your email address?" data-original-title="Email" value="<%=data.user_email%>">
               </div>
             </div>
 
             <div class="control-group">
-              <label class="control-label" for="input01">Password</label>
+              <label class="control-label" for="pwd">Password</label>
               <div class="controls">
-                <input type="password" class="input-xlarge" id="pwd" name="pwd" rel="popover" data-content="6 characters or more! " data-original-title="Password" >
+                <input type="password" class="form-control" id="pwd" name="pwd" rel="popover" data-content="6 characters or more! " data-original-title="Password" >
               </div>
             </div>
             <div class="control-group">
-              <label class="control-label" for="password">Confirm Password</label>
+              <label class="control-label" for="cpwd">Confirm Password</label>
               <div class="controls">
-                <input type="password" class="input-xlarge" id="cpwd" name="cpwd" rel="popover" data-content="Re-enter your password for confirmation." data-original-title="Re-Password" >
+                <input type="password" class="form-control" id="cpwd" name="cpwd" rel="popover" data-content="Re-enter your password for confirmation." data-original-title="Re-Password" >
               </div>
             </div>
 
@@ -101,7 +101,7 @@ $(document).ready(function () {
 
 
             <div class="control-group">
-              <label class="control-label" for="input01"></label>
+              <label class="control-label" for="signup"></label>
               <div class="controls">
                 <button id="signup" class="btn btn-success" rel="tooltip" title="first tooltip">Create My Account</button>
                  - or -

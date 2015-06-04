@@ -25,6 +25,12 @@ var locals = {
         author: 	 'David Erickson',
         error: '',
         js: '',
+        data: { user_name: '',
+                org: 'demo',
+                user_email: '',
+                pwd: '',
+                cpwd: '',
+                gender: '' },
         _layoutFile: true
     };
 

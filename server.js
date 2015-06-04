@@ -4,9 +4,12 @@
  * The main file, to be invoked at the command line. Calls app.js to get 
  * the Express app object.
  */
-
-var app = require('./app').init(80);
+var port = 5000;
+var app = require('./app').init(port);
 var fs = require('fs');
+
+
+
 
 var redisdb = require('./models/redisdb.js');
 var utils = require('./models/formutils.js');
@@ -22,6 +25,8 @@ var MYSQL_PASSWORD = 'donastia';
 var dbName = "eis_graphs";
 dbName = "northwind";
 // init;
+
+/*
 var client = mysql.createConnection({
   user: MYSQL_USERNAME,
   password: MYSQL_PASSWORD,
@@ -31,6 +36,342 @@ client.query('CREATE DATABASE IF NOT EXISTS ' + dbName + ';', function (err, dat
 {
 	client.query('USE ' + dbName);
 });
+*/
+
+
+
+
+
+/*
+START MESSAGING CODE
+*/
+//var io = require('socket.io');
+var socket = require('socket.io')(server);
+var uuid = require('node-uuid');
+var asEvented = require('asEvented');
+var redis = require("redis"),
+RedisClient = redis.createClient();
+
+
+var LOCAL_CACHE_LIST = "lst:localmsg";
+
+// for Redis cache
+var LOCAL_CACHE = "localhost";
+var LOCAL_CACHE_LIST_COUNTER = "cnt:localmsg";
+var CACHE_CONNECTED_USERS = "cnt:users";
+
+//var port = 3000; // default port
+var ip = 'localhost'; // server ip to connect to...
+var MAX_UNSIGNED_SHORT = 65535;
+
+//var io = require('socket.io').listen(Number(port));
+
+function Message()
+{
+	this.id = uuid.v1();
+}
+
+asEvented.call(Message.prototype);
+
+
+Message.prototype.send = function (msg, nPersist) {
+	if (nPersist != 0)
+	{
+
+		RedisClient.set(this.id,msg);
+		RedisClient.sadd(LOCAL_CACHE_LIST, this.id);
+
+		RedisClient.incr(LOCAL_CACHE_LIST_COUNTER, function (err, data)
+		{
+			if (data > MAX_UNSIGNED_SHORT)
+			{
+				// Assuming we do not exceed our max message cache size.
+			}
+		});
+	}
+  	this.trigger('message', msg); // Model has now access to trigger
+}
+
+Message.prototype.setId = function (id) {
+	this.trigger('setId', id);
+}
+
+var objMsg = new Message();
+
+objMsg.bind('setId', function (id) {
+	this.id = id;
+});
+
+objMsg.bind('message', function (msg) {
+	var msgJson = {};
+	msgJson.msg = msg;
+	msgJson.id = this.id;
+
+  	console.log('sending msg: ' +  msg);
+  	socket.emit('message', JSON.stringify(msgJson));
+
+});
+
+RedisClient.del(LOCAL_CACHE_LIST);
+RedisClient.del(LOCAL_CACHE_LIST_COUNTER);
+RedisClient.del(CACHE_CONNECTED_USERS);
+
+var buffer = [];
+socket.sockets.on('connection', function(client) {
+    //console.log('a user connected');
+
+    //client.emit('history', { buffer: buffer });
+    buffer.forEach(function (item) {
+        log (item.message[0] + ' said: ' + item.message[1]);
+        socket.sockets.emit('announcement', item.message[0] + ' said: ' + item.message[1] + ' at ' + item.message[2]);
+    });
+
+    RedisClient.incrby(CACHE_CONNECTED_USERS, 1, function (err, counter) {
+        socket.sockets.emit('announcement', client.id + ' connected. (' + counter + ') clients connected.');
+    });
+
+
+
+    client.on('message', function(message){
+            var msg = { message: [client.id, JSON.parse(message).msg, new Date()], id:JSON.parse(message).id  };
+            // this is so that we can get previous messages from users who have connected previously.
+
+            buffer.push(msg);
+            if (buffer.length > 15) buffer.shift();
+            socket.sockets.emit('message', msg);
+            // socket.sockets.emit ('messageReceipt', JSON.parse(message).id);
+        });
+
+        client.on('messageReceipt', function(msgid){
+                var guid = msgid + '';
+                log ('message id received ' + msgid + ' and removed from local cache.');
+
+                RedisClient.del(guid);
+                RedisClient.srem (LOCAL_CACHE_LIST, guid);
+                RedisClient.decr(LOCAL_CACHE_LIST_COUNTER);
+            });
+
+    client.on('disconnect', function(){
+        RedisClient.decrby(CACHE_CONNECTED_USERS, 1, function (err, counter){
+            socket.sockets.emit('announcement', client.id + ' disconnected. (' + counter + ') clients connected.');
+        });
+
+    });
+});
+
+// 1 will persist to local cache
+// otherwise message failure will not resend the next time.
+// objMsg.send("Application Starting Up", 1);
+
+/*
+END MESSAGING CODE
+*/
+
+
+
+
+/* START JSON to SQL function */
+JsonToSQL = function (tblPrefix, org, pkcolumn, tablename, formdata, callback)
+{
+    var ret = {};
+    var err = null;
+    var sql = "INSERT INTO ";
+    sql += tablename;
+
+    // var pkcolumn = "test_id";
+    var pkvalue = "";
+
+    log("PKCOLUMN IS......" + pkcolumn);
+    log("tablename IS......" + tablename);
+
+    // var select = "SELECT * FROM " + tablename + " WHERE " + pkcolumn "='" + client.escape(formData[pkcolumn]) + "'";
+    // OR we could just do this
+
+    var isInsert = (parseInt(formdata[pkcolumn]) > 0);
+    var sqlupdates = "";
+    if (isInsert)
+    {
+        // CREATE AN UPDATE QUERY
+        sql = "UPDATE " + tablename + " SET LastUpdatedDate='" + new Date() + "',";
+        for(_key in formdata)
+        {
+            if (_key.trim().length > 0)
+            {
+                var val = formdata[_key];
+                if (pkcolumn == _key)
+                {
+                    pkvalue = val;
+                }
+
+                if (_key.indexOf (SKIP_KEY) == -1)
+                {
+                    if (_key == tablename.substring(tblPrefix.length) + "_id"  || _key == "CreatedDate" || _key == "CreatedBy" || _key == "LastUpdatedDate" || _key == "LastUpdatedBy")
+                    {
+
+                    } else {
+
+                        sqlupdates += " " + _key + "=" + client.escape(val) + ",";
+                    }
+                }
+
+            }
+        }
+        if (sqlupdates.length > 0)
+        {
+            sqlupdates = sqlupdates.substring(0, sqlupdates.length - 1);
+        }
+        sql = sql + sqlupdates + " WHERE " + pkcolumn + "=" + client.escape(formdata[pkcolumn]) + ";";
+
+    } else {
+        // CREATE AN INSERT QUERY
+        sql = "INSERT INTO " + tablename + " ("; // ) VALUES ()
+        sqlupdates = "";
+        for(_key in formdata)
+        {
+            if (_key.trim().length > 0)
+            {
+                var val = formdata[_key];
+                if (pkcolumn == _key)
+                {
+                    pkvalue = val;
+                }
+                if (_key.indexOf (SKIP_KEY) == -1)
+                {
+                    //sql += _key;
+                    //sql += ",";
+                }
+                if (_key == tablename.substring(tblPrefix.length) + "_id")
+                {
+
+                } else {
+                    sql += " " + _key + " " + ",";
+                    // here remove duplicates , ''
+                    sqlupdates += " " + client.escape(val) + ",";
+                }
+            }
+
+        }
+        if (sqlupdates.length > 0)
+        {
+            sqlupdates = sqlupdates.substring(0, sqlupdates.length - 1);
+        }
+        if (sql.length > 0)
+        {
+            sql = sql.substring(0, sql.length - 1);
+        }
+        sql = sql + ") VALUES (" + sqlupdates + ")";
+    }
+
+    log(sql);
+
+    if (callback != null)
+    {
+        callback(err,sql);
+    } else {
+        return sql;
+    }
+}
+
+JsonToSQLUnionTable = function (id, org, tablename, jsonData, callback)
+{
+    var err = null;
+    var bKeyExists = false;
+    var uniontable = "";
+    var groupvalues = [];
+
+    for(i in jsonData)
+    {
+        var _key = i;
+        if (_key.indexOf (SKIP_KEY) == -1 && _key != tablename.substring(3) + "_id")
+        {
+            var val = jsonData[i];
+            var type = getDBType(_key,val);
+
+            if (val != undefined && val != null)
+            {
+                if (val.length > 0)
+                {
+                    if (val[0] == "[" && val[val.length -1] == "]")
+                    {
+                        uniontable = tablename.substring(0,3) + _key;
+                        var sql = "create table IF NOT EXISTS `" + uniontable + "` (`"+
+                                _key + "_id` int unsigned not null auto_increment,";
+
+                        sql += " `" + tablename.substring(3) + "_id` " + "int(10)" + " ,"; // not null default ''
+                        sql += " `" + "Group" + "` " + type + " ,";
+
+                        if (val != undefined)
+                        {
+                            val = val.replace("[","").replace("]","");
+                        }
+                        groupvalues = val.split(',');
+
+
+                        sql += " primary key (`" + _key + "_id`)"+
+                                ");";
+
+                    }
+                }
+            }
+        }
+    }
+
+    if (uniontable.length > 0)
+    {
+        log(sql);
+        client.query(sql, function (err, data)
+        {
+            if (err == null)
+            {
+                sql = "DELETE FROM " + uniontable + " WHERE " + tablename.substring(3) + "_id=" + id + ";";
+                runSQL(sql);
+                for (var i=0; i < groupvalues.length; i++)
+                {
+                    var val = groupvalues[i];
+                    if (val.length > 0)
+                    {
+                        sql = "INSERT INTO " + uniontable + " (" + tablename.substring(3) + "_id" + ",`Group`) VALUES (" + id + "," + "'" + val + "')" + ";";
+                    }
+                    runSQL(sql);
+                }
+            }
+        });
+    }
+}
+
+/* END JSON to SQL function */
+
+
+// Resending saved messages
+// from the cache.
+// this occurs when the client program starts up.
+RedisClient.smembers( LOCAL_CACHE_LIST,function(err, data) {
+	if (data != null)
+	{
+		for (var index in data) {
+			var guid = data[index];
+			RedisClient.get(guid,function (err, _data){
+				if (_data != null)
+				{
+					objMsg.setId(guid);
+					objMsg.send(_data,0);
+				}
+				if (err != null)
+				{
+					log (err);
+				}
+			})
+		}
+	}
+});
+
+
+
+
+
+
+
+
 
 
 /*
@@ -476,6 +817,10 @@ app.post('/login', function(req, res){
 app.get('/register', function(req,res){
     utils.locals.date = new Date().toLocaleDateString();
     var user = User(req);
+    if (user == null)
+    {
+        user = utils.locals['data'];
+    }
     utils.locals['data'] = user;
     utils.locals['layout'] = false;
     res.render('register.ejs', utils.locals);

@@ -5,6 +5,14 @@
   #sortable li { margin: 0 3px 3px 3px; padding: 0.4em; padding-left: 1.5em; font-size: 1.4em; height: 18px; }
   #sortable li span { position: absolute; margin-left: -1.3em; }
   </style>
+
+<style>
+#messages { list-style-type: none; margin: 0; padding: 0; }
+#messages li { padding: 5px 10px; }
+#messages li:nth-child(odd) { background: #eee; }
+</style>
+
+
   <script>
   $(function() {
     $( "#sortable" ).sortable();
@@ -12,11 +20,65 @@
   });
   </script>
 
+<script src="/socket.io/socket.io.js"></script>
 <script>
 function sortTable (column, direction)
 {
   console.log ('sorting ' + column + ' - ' + direction); 
 }
+</script>
+
+<script>
+function log (type, msg)
+{
+    console.log(type + ": " + msg);
+}
+
+// Create SocketIO instance, connect
+var socket = io();
+
+socket.on('announcement', function (data) {
+  	log ("announcement", data);
+  	$('#messages').append($('<li>').text(data));
+});
+
+socket.on('message', function (data) {
+		var msg = data.message[0] + ' says: ' + data.message[1];
+  		log ("message", msg);
+
+  		$('#messages').append($('<li>').text(msg));
+
+  		// clears the message from server cache
+  		socket.emit ('messageReceipt', data.id);
+});
+
+
+
+function guid() {
+  function s4() {
+    return Math.floor((1 + Math.random()) * 0x10000)
+      .toString(16)
+      .substring(1);
+  }
+  return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
+    s4() + '-' + s4() + s4() + s4();
+}
+
+
+// Sends a message to the server via sockets
+function sendMessageToServer(message) {
+	//socket.send(message);
+	var msgJson = {};
+	msgJson.msg = message;
+	msgJson.id = guid();
+	socket.emit('message', JSON.stringify(msgJson));
+}
+
+
+
+sendMessageToServer("test message");
+
+
 </script>
 
 <div style="display:none;">
@@ -50,6 +112,10 @@ function sortTable (column, direction)
         <p>Custom e-Commerce Website Application Packages</p>
         <p><a class="btn btn-primary btn-lg">Learn more</a></p>
     </div>
+
+    <ul id="messages">
+
+    </ul>
 
 
 
