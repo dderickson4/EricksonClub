@@ -26,7 +26,7 @@ var dbName = "eis_graphs";
 dbName = "northwind";
 // init;
 
-/*
+
 var client = mysql.createConnection({
   user: MYSQL_USERNAME,
   password: MYSQL_PASSWORD,
@@ -36,7 +36,7 @@ client.query('CREATE DATABASE IF NOT EXISTS ' + dbName + ';', function (err, dat
 {
 	client.query('USE ' + dbName);
 });
-*/
+
 
 
 
@@ -112,6 +112,16 @@ objMsg.bind('message', function (msg) {
 
 });
 
+function guid() {
+  function s4() {
+    return Math.floor((1 + Math.random()) * 0x10000)
+      .toString(16)
+      .substring(1);
+  }
+  return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
+    s4() + '-' + s4() + s4() + s4();
+}
+
 RedisClient.del(LOCAL_CACHE_LIST);
 RedisClient.del(LOCAL_CACHE_LIST_COUNTER);
 RedisClient.del(CACHE_CONNECTED_USERS);
@@ -122,23 +132,34 @@ socket.sockets.on('connection', function(client) {
 
     //client.emit('history', { buffer: buffer });
     buffer.forEach(function (item) {
-        log (item.message[0] + ' said: ' + item.message[1]);
-        socket.sockets.emit('announcement', item.message[0] + ' said: ' + item.message[1] + ' at ' + item.message[2]);
+        var data = item;
+        log (data.clientid + ' said: ' + data.message.msg);
+        socket.sockets.emit('announcement', data);
     });
 
     RedisClient.incrby(CACHE_CONNECTED_USERS, 1, function (err, counter) {
-        socket.sockets.emit('announcement', client.id + ' connected. (' + counter + ') clients connected.');
+        var msgJson = {};
+        	msgJson.msg = client.id + ' connected. (' + counter + ') clients connected.';
+        	msgJson.id = guid();
+        	msgJson.action = "update";
+        	msgJson.formid = "firstname";
+        	msgJson.formvalue = client.id + ' connected. (' + counter + ') clients connected.';
+        var msg = { clientid: client.id, message: msgJson, DateCreated: new Date(), id:guid(), connections: counter  };
+        socket.sockets.emit('announcement', msgJson);
     });
 
 
 
     client.on('message', function(message){
-            var msg = { message: [client.id, JSON.parse(message).msg, new Date()], id:JSON.parse(message).id  };
+            console.log(message);
+            // message.formid = "firstname";
+            var msg = { clientid: client.id, message: message, DateCreated: new Date(), id:guid()  };
             // this is so that we can get previous messages from users who have connected previously.
 
             buffer.push(msg);
             if (buffer.length > 15) buffer.shift();
-            socket.sockets.emit('message', msg);
+
+            socket.sockets.emit('broadcastmessage', msg);
             // socket.sockets.emit ('messageReceipt', JSON.parse(message).id);
         });
 
@@ -153,7 +174,15 @@ socket.sockets.on('connection', function(client) {
 
     client.on('disconnect', function(){
         RedisClient.decrby(CACHE_CONNECTED_USERS, 1, function (err, counter){
-            socket.sockets.emit('announcement', client.id + ' disconnected. (' + counter + ') clients connected.');
+
+            var msgJson = {};
+            msgJson.msg = client.id + ' connected. (' + counter + ') clients connected.';
+            msgJson.id = guid();
+            msgJson.action = "update";
+            msgJson.formid = "firstname";
+            msgJson.formvalue = client.id + ' disconnected. (' + counter + ') clients connected.';
+            var msg = { clientid: client.id, message: msgJson, DateCreated: new Date(), id:guid(), connections: counter  };
+            socket.sockets.emit('announcement', msgJson);
         });
 
     });
@@ -171,11 +200,56 @@ END MESSAGING CODE
 
 
 /* START JSON to SQL function */
+JsonToCreateTableSQL = function (tblPrefix, org, pkcolumn, tablename, jsonData, callback)
+{
+    var cLeftBracket = "`";
+    var cRightBracket = "`";
+    var err = null;
+    var sql = ""+
+				"create table IF NOT EXISTS " + cLeftBracket + tblPrefix + tablename + cRightBracket + " ("+
+				cLeftBracket + tblPrefix + tablename + "_id" + cRightBracket + " int unsigned not null auto_increment,";
+	for(i in jsonData)
+	{
+		var _key = i;
+		if (isColumn(_key))
+		{
+			var val = jsonData[i];
+			var type = getDBType(_key,val);
+			if (isNaN(val))
+			{
+				sql += " " + cLeftBracket + _key + cRightBracket + " " + type + " ,"; // not null default ''
+			} else {
+				sql += " " + cLeftBracket + _key + cRightBracket + " " + type + " ,"; // not null default 0
+			}
+
+		}
+	}
+
+	sql += " primary key (" + cLeftBracket + tblPrefix + tablename + "_id" + cRightBracket + ")"+
+		");";
+
+	log(sql);
+
+
+    if (callback != null)
+    {
+        callback(err,sql);
+    } else {
+        return sql;
+    }
+
+};
+
+
 JsonToSQL = function (tblPrefix, org, pkcolumn, tablename, formdata, callback)
 {
+    tablename = tblPrefix + tablename;
+
     var ret = {};
     var err = null;
+
     var sql = "INSERT INTO ";
+
     sql += tablename;
 
     // var pkcolumn = "test_id";
@@ -432,7 +506,12 @@ function getWhereClause (jsonData)
 
 function getTablePrefix(jsonData)
 {
-	return "tbl";
+    if (jsonData.org != undefined && jsonData.org != null && (jsonData.org + '').length > 0)
+    {
+        return jsonData.org;
+    } else {
+	    return "tbl";
+	}
 }
 
 function checkauth(req, res, next) {
@@ -467,6 +546,10 @@ app.get('/tableschema/:tablename', function (req, res){
 		}
 	});	
 });
+
+
+
+
 
 app.post('/createtable', function (req,res){
 	var tablename = 'people';
@@ -576,14 +659,15 @@ req.session.user
 app.post('/:category/:subcategory/customer-files',checkauth, function (req, res) {
 	console.log("post customer files - " + req.files.file.name);
 	console.log(req.session.user);
-
+    console.log(req.files.file);
 	var user = User(req);
   	var formdata = {};
   	formdata.userid = user.id;
-  	formdata.path = req.files.file.name;
+  	formdata.path = req.files.file.path;
   	formdata.org = user.org;
   	formdata.subcategory = req.params.subcategory;
   	formdata.category = req.params.category;
+  	formdata.filename = req.files.file.name;
 
 	var arrLookupKeys = [];
 	arrLookupKeys.push(formdata.path);
@@ -594,13 +678,119 @@ app.post('/:category/:subcategory/customer-files',checkauth, function (req, res)
 	var org = user.org;
 	var table = 'product-files';
 
-	SaveRecord(org, table, arrLookupKeys, arrSaveKeys, formdata, function (err1, data1)
-	{
-		console.log(data1);
-	});
+    JsonToCreateTableSQL(user.org, user.org, "product_id","product",formdata, function (err, sql) {
+        client.query(sql + ';', function (err, data)
+        {
 
-	res.redirect("back");
-	
+            JsonToSQL(user.org, user.org, "product_id","product",formdata, function (err, sql) {
+               client.query(sql + ';', function (err, data)
+               {
+                    log ("err: " + err);
+                    log ("data: " + data);
+                    SaveRecord(org, table, arrLookupKeys, arrSaveKeys, formdata, function (err1, data1)
+                    	{
+                    	    // (tblPrefix, org, pkcolumn, tablename, formdata
+                            res.redirect("back");
+                    		console.log(data1);
+                    	});
+
+               });
+            });
+        });
+    });
+});
+
+app.post('/createtable/:tablename', function (req,res){
+    logfunction (req, "8");
+	var tablename = req.params.tablename;
+	var jsonData = req.body;
+	var tblprefix = getTablePrefix(User(req));
+	var sql = "create table IF NOT EXISTS `" + tblprefix + tablename + "` (`"+
+		tblprefix + tablename + "_id` int unsigned not null auto_increment,";
+
+    log(sql);
+
+	for(i in jsonData)
+	{
+		var _key = i;
+		if (isColumn(_key))
+		{
+			var val = jsonData[i];
+			var type = getDBType(_key,val);
+			if (isNaN(val))
+			{
+				sql += " `" + _key + "` " + type + " ,"; // not null default ''
+			} else {
+				sql += " `" + _key + "` " + type + " ,"; // not null default 0
+			}
+
+		}
+	}
+
+	sql += " primary key (`" + tblprefix + tablename + "_id`)"+
+		");";
+
+
+	client.query(sql, function (err, data)
+	{
+	    sql = "SELECT `COLUMN_NAME` from INFORMATION_SCHEMA.COLUMNS where table_schema='" + dbName + "' AND table_name= '" + tblprefix + tablename + "';";
+	    //console.log(sql);
+	    client.query(sql, function (err, data)
+	    {
+		    if (data == null)
+		    {
+			    data = {};
+			    data.error = "No Records found.";
+		    }
+		    var strColumns = "";
+		    var arrColumns = [];
+		    for (var i = 0; i < data.length; i++) {
+			var objJson = data[i];
+			var existingColumn = objJson.COLUMN_NAME;
+			if (i > 0) {
+			    strColumns += "|";
+			}
+			strColumns += existingColumn;
+			arrColumns.push(existingColumn);
+		    }
+
+		    sql = "";
+		    for(i in jsonData)
+		    {
+			    var _key = i;
+			    if (isColumn(_key))
+			    {
+				log(_key + ":" + indexOf.call(arrColumns, _key));
+				if (indexOf.call(arrColumns, _key) == -1) {
+				    var val = jsonData[i];
+				    var type = getDBType(_key,val);
+				    sql = "ALTER TABLE " + tblprefix + tablename + " ADD"
+				    if (isNaN(val))
+				    {
+					    sql += " `" + _key + "` " + type + " "; // not null default ''
+				    } else {
+					    sql += " `" + _key + "` " + type + " "; // not null default 0
+				    }
+
+				    client.query(sql, function (err, data)
+				    {
+					//log(sql);
+					//log(err);
+					//log(data);
+				    });
+				}
+			    }
+		    }
+		    if (req.query.callback != undefined)
+		    {
+		    	    res.send(req.query.callback + '(' + data + ')');
+		    } else {
+		    	    res.send(data);
+		    }
+
+		  // res.send(sql);
+	    });
+	});
 });
 
 // ret.action = "NewRecord";
